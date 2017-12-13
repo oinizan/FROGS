@@ -3,7 +3,7 @@
 # Set default values
 if [ ! -z "$CONDA_PREFIX" ] ; then
   frogs_dir="$CONDA_PREFIX"
-  frogs_test=$frogs_dir/share/FROGS-2.0.0/test
+  frogs_test=$frogs_dir/share/FROGS-*/test
 else
   frogs_dir=".."
   frogs_test=$frogs_test/test
