@@ -1,20 +1,68 @@
 #!/bin/bash
-frogs_dir=$1
-nb_cpu=$2
-java_mem=$3
-out_dir=$4
 
-# Check parameters
-if [ "$#" -ne 4 ]; then
-    echo "ERROR: Illegal number of parameters." ;
-    echo 'Command usage: test.sh <FROGS_FOLDER> <NB_CPU> <JAVA_MEM> <OUT_FOLDER>' ;
-    exit 1 ;
+# Set default values
+if [ ! -z "$CONDA_PREFIX" ] ; then
+  frogs_dir="$CONDA_PREFIX"
+  frogs_test=$frogs_dir/share/FROGS-2.0.0/test
+else
+  frogs_dir=".."
+  frogs_test=$frogs_test/test
 fi
+nb_cpu=1
+java_mem=4
+out_dir=/tmp
+delete_out_dir=false
+run_pynast=false
+
+# FUNCTION: display help message
+function help(){
+  printf "\n$0: a script to test FROGS distribution with sample data set. \n"
+  printf "\n Optional arguments are:"
+  printf "\n  -c <cores>         : nb of cores to use (default: 1)"
+  printf "\n  -m <java_mem>      : nb of Gb to allocate to Java Runtime (default: 4)"
+  printf "\n  -o <output-dir>    : working directory to use during testing (default: /tmp/)"
+  printf "\n  -f <FROGS-home_dir>: home directory of FROGS (default: ".." if standalone; $CONDA_PREFIX if Conda environment)"
+  printf "\n  -p                 : run Pynast step (default: false)"
+  printf "\n  -d                 : delete output-dir when tests are completed (default: false)"
+  printf "\n  -h                 : print this message" 
+  printf "\n"
+  exit 0
+}
+
+# Prepare arguments for processing
+while getopts hdpc:m:o:f: opt
+do
+    case "$opt" in
+      c)  nb_cpu="$OPTARG";;
+      m)  java_mem="$OPTARG";;
+      o)  out_dir="$OPTARG";;
+      f)  frogs_dir="$OPTARG";;
+      d)  delete_out_dir=true;;
+      p)  run_pynast=true;;
+      h)  help;;
+      \?)	help;;
+    esac
+done
+shift `expr $OPTIND - 1`
+
+out_dir=${out_dir}/frogs-test-result
+
+echo "Starting FROGS tests with:"
+echo "  Nb cores         : $nb_cpu"
+echo "  Java mem         : $java_mem"
+echo "  Output dir       : $out_dir"
+echo "  FROGS dir        : $frogs_dir"
+echo "  FROGS test       : $frogs_test"
+echo "  Run pynast       : $run_pynast"
+echo "  Delete output dir: $delete_out_dir (will be done only if all tests are ok)"
+echo ""
 
 # Set ENV
+if [ ! -v $CONDA_PREFIX ] ; then
+  export PATH=$frogs_dir/libexec:$frogs_dir/app:$PATH
+fi
 export PATH=$frogs_dir/libexec:$frogs_dir/app:$PATH
 export PYTHONPATH=$frogs_dir/lib:$PYTHONPATH
-
 
 # Create output folder
 if [ ! -d "$out_dir" ]
@@ -29,7 +77,7 @@ preprocess.py illumina \
  --min-amplicon-size 380 --max-amplicon-size 460 \
  --five-prim-primer GGCGVACGGGTGAGTAA --three-prim-primer GTGCCAGCNGCNGCGG \
   --R1-size 250 --R2-size 250 --expected-amplicon-size 420 \
- --input-archive $frogs_dir/test/data/test_dataset.tar.gz \
+ --input-archive $frogs_test/data/test_dataset.tar.gz \
  --output-dereplicated $out_dir/01-prepro.fasta \
  --output-count $out_dir/01-prepro.tsv \
  --summary $out_dir/01-prepro.html \
@@ -104,7 +152,7 @@ fi
 echo "Step affiliation_OTU `date`"
 
 affiliation_OTU.py \
- --reference $frogs_dir/test/data/db.fasta \
+ --reference $frogs_test/data/db.fasta \
  --input-fasta $out_dir/04-filters.fasta \
  --input-biom $out_dir/04-filters.biom \
  --output-biom $out_dir/04-affiliation.biom \
@@ -199,21 +247,25 @@ then
 	exit 1;
 fi
 
-echo "Step tree : pynast `date`"
+echo $run_pynast
 
-tree.py \
- --nb-cpus $nb_cpu  \
- --input-otu $out_dir/04-filters.fasta \
- --biomfile $out_dir/04-affiliation.biom \
- --template-pynast $frogs_dir/test/data/otus_pynast.fasta \
- --out-tree $out_dir/10a-tree.nwk \
- --html $out_dir/10a-tree.html \
- --log-file $out_dir/10a-tree.log
- 
-if [ $? -ne 0 ]
-then
-	echo "Error in tree : pynast" >&2
-	exit 1;
+if $run_pynast ; then
+	echo "Step tree : pynast `date`"
+	
+	tree.py \
+	 --nb-cpus $nb_cpu  \
+	 --input-otu $out_dir/04-filters.fasta \
+	 --biomfile $out_dir/04-affiliation.biom \
+	 --template-pynast $frogs_test/data/otus_pynast.fasta \
+	 --out-tree $out_dir/10a-tree.nwk \
+	 --html $out_dir/10a-tree.html \
+	 --log-file $out_dir/10a-tree.log
+	 
+	if [ $? -ne 0 ]
+	then
+		echo "Error in tree : pynast" >&2
+		exit 1;
+	fi
 fi
 
 echo "Step tree : mafft `date`"
@@ -235,9 +287,9 @@ fi
 echo "Step r_import_data `date`"
 
 r_import_data.py  \
- --biomfile $out_dir/08-affiliation_std.biom \
- --samplefile $frogs_dir/test/data/sample_metadata.tsv \
- --treefile $out_dir/10b-tree.nwk \
+ --biomfile $frogs_test/data/chaillou.biom \
+ --samplefile $frogs_test/data/sample_metadata.tsv \
+ --treefile $frogs_test/data/tree.nwk \
  --rdata $out_dir/11-phylo_import.Rdata --html $out_dir/11-phylo_import.html --log-file $out_dir/11-phylo_import.log
 
  
@@ -250,7 +302,7 @@ fi
 echo "Step r_composition `date`"
 
 r_composition.py  \
- --varExp Color --taxaRank1 Kingdom --taxaSet1 Bacteria --taxaRank2 Phylum --numberOfTaxa 9 \
+ --varExp EnvType --taxaRank1 Kingdom --taxaSet1 Bacteria --taxaRank2 Phylum --numberOfTaxa 9 \
  --rdata $out_dir/11-phylo_import.Rdata \
  --html $out_dir/12-phylo_composition.html --log-file $out_dir/12-phylo_composition.log
 
@@ -264,7 +316,7 @@ fi
 echo "Step r_alpha_diversity `date`"
 
 r_alpha_diversity.py  \
- --varExp Color \
+ --varExp EnvType \
  --rdata $out_dir/11-phylo_import.Rdata --alpha-measures Observed Chao1 Shannon \
  --alpha-out $out_dir/13-phylo_alpha_div.tsv --html $out_dir/13-phylo_alpha_div.html --log-file $out_dir/13-phylo_alpha_div.log
 
@@ -278,7 +330,7 @@ fi
 echo "Step r_beta_diversity `date`"
 
 r_beta_diversity.py  \
- --varExp Color --distance-methods cc,unifrac \
+ --varExp EnvType --distance-methods cc,unifrac \
  --rdata $out_dir/11-phylo_import.Rdata \
  --matrix-outdir $out_dir --html $out_dir/14-phylo_beta_div.html --log-file $out_dir/14-phylo_beta_div.log
 
@@ -289,24 +341,24 @@ then
 	exit 1;
 fi
 
-#~ echo "Step r_structure `date`"
-#~ 
-#~ r_structure.py  \
- #~ --varExp Color --ordination-method MDS \
- #~ --rdata $out_dir/11-phylo_import.Rdata --distance-matrix $out_dir/Unifrac.tsv \
- #~ --html $out_dir/15-phylo_structure.html --log-file $out_dir/15-phylo_structure.log
-#~ 
- #~ 
-#~ if [ $? -ne 0 ]
-#~ then
-	#~ echo "Error in r_structure " >&2
-	#~ exit 1;
-#~ fi
+echo "Step r_structure `date`"
+
+r_structure.py  \
+ --varExp EnvType --ordination-method MDS \
+ --rdata $out_dir/11-phylo_import.Rdata --distance-matrix $out_dir/Unifrac.tsv \
+ --html $out_dir/15-phylo_structure.html --log-file $out_dir/15-phylo_structure.log
+
+ 
+if [ $? -ne 0 ]
+then
+	echo "Error in r_structure " >&2
+	exit 1;
+fi
 
 echo "Step r_clustering `date`"
 
 r_clustering.py  \
- --varExp Color \
+ --varExp EnvType \
  --rdata $out_dir/11-phylo_import.Rdata --distance-matrix $out_dir/Unifrac.tsv \
  --html $out_dir/16-phylo_structure.html --log-file $out_dir/16-phylo_structure.log
 
@@ -320,7 +372,7 @@ fi
 echo "Step r_manova `date`"
 
 r_manova.py  \
- --varExp Color \
+ --varExp EnvType \
  --rdata $out_dir/11-phylo_import.Rdata --distance-matrix $out_dir/Unifrac.tsv \
  --html $out_dir/17-phylo_structure.html --log-file $out_dir/17-phylo_structure.log
 
@@ -329,6 +381,10 @@ if [ $? -ne 0 ]
 then
 	echo "Error in r_manova " >&2
 	exit 1;
+fi
+
+if [ $delete_out_dir ] ; then
+  rm -rf $out_dir
 fi
 
 echo "Completed with success"
