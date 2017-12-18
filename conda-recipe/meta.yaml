@@ -12,7 +12,7 @@ build:
 
 source:
   url: https://github.com/oinizan/FROGS/archive/v{{ version }}.tar.gz
-  md5: e291676b44a7f216a36402c25fe6abbc
+  md5: bbcbbeb5152a8fdf04f8e3228315f7f5
 
 requirements:
   build:
